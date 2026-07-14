@@ -7,10 +7,11 @@ resource "random_string" "bucket_suffix" {
   min_lower        = 1
   min_numeric      = 1
 }
-resource "google_project_service" "storage_api" {
-  project            = var.project_id
-  service            = "storage.googleapis.com"
-  disable_on_destroy = false
+
+resource "google_project_service_identity" "gcs_sa" {
+  provider = google-beta
+  project  = var.project_id
+  service  = "storage.googleapis.com"
 }
 
 resource "google_storage_bucket" "bucket" {
