@@ -7,6 +7,12 @@ resource "random_string" "bucket_suffix" {
   min_lower        = 1
   min_numeric      = 1
 }
+resource "google_project_service" "storage_api" {
+  project            = var.project_id
+  service            = "storage.googleapis.com"
+  disable_on_destroy = false
+}
+
 resource "google_storage_bucket" "bucket" {
   count                       = var.no_of_buckets
   name                        = "${var.name_of_buckets[count.index]}-${random_string.bucket_suffix.result}"
