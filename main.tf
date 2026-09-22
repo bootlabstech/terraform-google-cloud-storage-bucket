@@ -1,17 +1,62 @@
 ##### Terraform Resource Block To Create a GCS Bucket #####
+
 resource "random_string" "bucket_suffix" {
-  length           = 3  # Adjust the length of the suffix as needed
-  special          = false
-  upper            = false
-  number           = true
-  min_lower        = 1
-  min_numeric      = 1
+  length      = 3
+  special     = false
+  upper       = false
+  numeric      = true
+  min_lower   = 1
+  min_numeric = 1
+}
+
+### kms key auto fetching BLOCK newly added
+
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
+data "google_kms_key_ring" "project_keyring" {
+  project  = var.project_id
+  name     = var.project_id
+  location = var.location
+}
+
+data "google_kms_crypto_key" "project_key" {
+  name     = "${data.google_project.current.name}-key"
+  key_ring = data.google_kms_key_ring.project_keyring.id
+}
+### kms key auto fetching BLOCK newly added
+
+resource "google_project_service" "storage" {
+  project            = var.project_id
+  service            = "storage.googleapis.com"
+  disable_on_destroy = false
 }
 
 resource "google_project_service_identity" "gcs_sa" {
   provider = google-beta
   project  = var.project_id
   service  = "storage.googleapis.com"
+
+  depends_on = [google_project_service.storage]
+}
+
+resource "time_sleep" "wait_for_gcs_sa" {
+  create_duration = "60s"
+
+  depends_on = [google_project_service_identity.gcs_sa]
+}
+
+resource "google_kms_crypto_key_iam_member" "gcs_cmek" {
+  crypto_key_id = data.google_kms_crypto_key.project_key.id
+  role          = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  member        = "serviceAccount:service-${data.google_project.service_project4.number}@gs-project-accounts.iam.gserviceaccount.com"
+
+  depends_on = [time_sleep.wait_for_gcs_sa]
+
+  lifecycle {
+    ignore_changes = [member]
+  }
 }
 
 resource "google_storage_bucket" "bucket" {
@@ -23,11 +68,13 @@ resource "google_storage_bucket" "bucket" {
   storage_class               = var.storage_class
   labels                      = var.labels
   uniform_bucket_level_access = var.uniform_bucket_level_access
+
   lifecycle {
     ignore_changes = [
       labels
     ]
   }
+
   dynamic "lifecycle_rule" {
     for_each = var.lifecycle_rule
     content {
@@ -35,6 +82,7 @@ resource "google_storage_bucket" "bucket" {
         type          = lifecycle_rule.value.action.type
         storage_class = lookup(lifecycle_rule.value.action, "storage_class", null)
       }
+
       condition {
         age                        = lookup(lifecycle_rule.value.condition, "age", null)
         created_before             = lookup(lifecycle_rule.value.condition, "created_before", null)
@@ -48,6 +96,7 @@ resource "google_storage_bucket" "bucket" {
       }
     }
   }
+
   versioning {
     enabled = var.bucket_object_versioning
   }
@@ -77,52 +126,19 @@ resource "google_storage_bucket" "bucket" {
       log_object_prefix = var.log_object_prefix
     }
   }
-  dynamic "encryption" {
-    for_each = var.encryption == null ? [] : [var.encryption]
-    content {
-      default_kms_key_name = var.encryption.kms_key_name
-    }
+dynamic "encryption" {
+  for_each = [1]
+
+  content {
+    default_kms_key_name = data.google_kms_crypto_key.project_key.id
   }
-   depends_on = [ google_project_iam_binding.network_binding5 ]
 }
- data "google_project" "service_project4" {
+
+  depends_on = [
+    google_kms_crypto_key_iam_member.gcs_cmek
+  ]
+}
+
+data "google_project" "service_project4" {
   project_id = var.project_id
 }
-resource "google_project_iam_binding" "network_binding5" {
-  count   = 1
-  project = var.project_id
-  lifecycle {
-    ignore_changes = [ members ]
-  }
-  role    = "roles/cloudkms.cryptoKeyEncrypterDecrypter"
-  members = [
-    "serviceAccount:service-${data.google_project.service_project4.number}@gs-project-accounts.iam.gserviceaccount.com",
-  
-  ]
-  # depends_on = [ google_storage_bucket.auto-expire ]
-}
-# resource "google_storage_bucket" "auto-expire" {
-#   name          = "autoexpiringbucket${random_string.bucket_suffix.result}"
-#   project = var.project_id
-#   location      = var.location
-#   force_destroy = true
-#   uniform_bucket_level_access = true
-#   lifecycle_rule {
-#     condition {
-#       age = 1
-#     }
-#     action {
-#       type = "Delete"
-#     }
-#   }
-#   lifecycle_rule {
-#     condition {
-#       age = 1
-#     }
-#     action {
-#       type = "AbortIncompleteMultipartUpload"
-#     }
-#   }
-# }
-
-

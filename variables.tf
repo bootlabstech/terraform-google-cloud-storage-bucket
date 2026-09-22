@@ -83,11 +83,3 @@ variable "log_object_prefix" {
   type        = string
   default     = null
 }
-
-variable "encryption" {
-  description = "a cloud KMS key that will be used to encrypt objects inserted into this bucket"
-  type = object({
-    kms_key_name = string
-  })
-  default = null
-}
